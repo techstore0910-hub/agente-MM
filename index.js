@@ -10,8 +10,8 @@ const app = express();
 app.use(express.json({ limit: "32kb" }));
 const PORT = process.env.PORT || 8080;
 
-// Bloqueo deliberado: no habilitar antes de revisar código, autenticación y configuración.
-// No depende del contenido de la petición ni de una clave enviada por el cliente.
+// Bloqueo de atención hasta revisar autenticación y pruebas del circuito.
+// El servidor HTTP sí debe arrancar para que Railway supervise el proceso.
 const SERVICIO_HABILITADO = false;
 
 const DATOS_PAGO = Object.freeze({
@@ -629,7 +629,12 @@ function obtenerOpenAI() {
   return openai;
 }
 
-// Las rutas quedan deshabilitadas durante esta revisión.
+// Estado del servidor disponible aun cuando la atención siga en preparación.
+app.get("/", (req, res) => {
+  return res.status(200).send("Alexa Candles | Navidad En Cera activo");
+});
+
+// La atención queda deshabilitada durante esta revisión.
 // La habilitación y autenticación se resolverán antes de exponer el servicio.
 app.use((req, res, next) => {
   if (!SERVICIO_HABILITADO) {
@@ -639,10 +644,6 @@ app.use((req, res, next) => {
     });
   }
   return next();
-});
-
-app.get("/", (req, res) => {
-  return res.status(200).send("Alexa Candles | Navidad En Cera activo");
 });
 
 app.post("/mensaje", async (req, res) => {
@@ -694,12 +695,12 @@ app.use((error, req, res, next) => {
 });
 
 if (require.main === module) {
-  if (!SERVICIO_HABILITADO) {
-    console.log("Alexa Candles: servicio deshabilitado; pendiente revisión y configuración.");
-    process.exitCode = 1;
-  } else {
-    app.listen(PORT, () => console.log("Servidor de Alexa Candles en puerto " + PORT));
-  }
+  app.listen(PORT, () => {
+    console.log("Servidor de Alexa Candles en puerto " + PORT);
+    if (!SERVICIO_HABILITADO) {
+      console.log("Alexa Candles: servidor activo; atención en preparación.");
+    }
+  });
 }
 
 // Se conserva la superficie de verificación de la base sin iniciar el servidor.
