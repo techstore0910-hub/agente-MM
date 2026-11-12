@@ -6,13 +6,15 @@ require("dotenv").config();
 
 const express = require("express");
 const OpenAI = require("openai");
+const { createHash, timingSafeEqual } = require("node:crypto");
 const app = express();
 app.use(express.json({ limit: "32kb" }));
 const PORT = process.env.PORT || 8080;
 
-// Bloqueo de atención hasta revisar autenticación y pruebas del circuito.
-// El servidor HTTP sí debe arrancar para que Railway supervise el proceso.
-const SERVICIO_HABILITADO = false;
+// La atención solo se habilita al configurar un hash válido del secreto privado.
+// El servidor HTTP siempre arranca para que Railway supervise el proceso.
+const SOPORTE_SECRET_SHA256 = process.env.SOPORTE_SECRET_SHA256 || "";
+const SERVICIO_HABILITADO = /^[a-f0-9]{64}$/i.test(SOPORTE_SECRET_SHA256);
 
 const DATOS_PAGO = Object.freeze({
   marca: "Alexa Candles",
@@ -634,8 +636,10 @@ app.get("/", (req, res) => {
   return res.status(200).send("Alexa Candles | Navidad En Cera activo");
 });
 
-// La atención queda deshabilitada durante esta revisión.
-// La habilitación y autenticación se resolverán antes de exponer el servicio.
+// Protección independiente de la clave de OpenAI y del conocimiento de Alexa.
+// Límite global por proceso: 60 solicitudes autenticadas por minuto.
+let ventanaSoporte = Date.now();
+let solicitudesSoporte = 0;
 app.use((req, res, next) => {
   if (!SERVICIO_HABILITADO) {
     return res.status(503).json({
@@ -643,6 +647,25 @@ app.use((req, res, next) => {
       estado: "instalacion_pendiente"
     });
   }
+  const secreto = req.get("x-soporte-secret");
+  if (typeof secreto !== "string" || secreto.length < 32 || secreto.length > 256) {
+    return res.status(401).json({ respuesta: "Solicitud no autorizada.", estado: "no_autorizado" });
+  }
+  const recibido = createHash("sha256").update(secreto).digest();
+  const esperado = Buffer.from(SOPORTE_SECRET_SHA256, "hex");
+  if (!timingSafeEqual(recibido, esperado)) {
+    return res.status(401).json({ respuesta: "Solicitud no autorizada.", estado: "no_autorizado" });
+  }
+  const ahora = Date.now();
+  if (ahora - ventanaSoporte >= 60000) {
+    ventanaSoporte = ahora;
+    solicitudesSoporte = 0;
+  }
+  if (solicitudesSoporte >= 60) {
+    res.set("Retry-After", String(Math.max(1, Math.ceil((60000 - (ahora - ventanaSoporte)) / 1000))));
+    return res.status(429).json({ respuesta: "Intenta nuevamente en un momento.", estado: "limite_solicitudes" });
+  }
+  solicitudesSoporte += 1;
   return next();
 });
 
